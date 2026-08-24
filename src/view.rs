@@ -690,7 +690,7 @@ mod tests {
         note::Note,
         project::Project,
         task::{TASK_PRIORITY_NONE, TASK_STATUS_DONE, TASK_STATUS_ON_GOING, TASK_STATUS_UP_NEXT},
-        test_utils::{make_app, make_task},
+        test_utils::{make_app, make_task, sample_projects},
     };
     use ratatui::{backend::TestBackend, Terminal};
     use tui_textarea::TextArea;
@@ -792,6 +792,27 @@ mod tests {
     /// branch of `show_items` and panic in `Project::get_current` — the
     /// more so because ratatui clears the list selection (`select(None)`)
     /// when rendering an empty list.
+    /// Regression test: help opened over the task view rendered the task
+    /// list bound to the *project* `ListState`, so an empty task list (a
+    /// project whose only tasks are hidden `Done` ones) cleared the
+    /// project selection and the next `Project::get_current` panicked.
+    #[test]
+    fn show_items_with_help_over_tasks_keeps_the_project_selection() {
+        let mut app = make_app(sample_projects());
+        app.view_mode = ViewMode::ViewHelp;
+        app.previous_view_mode = ViewMode::ViewTasks;
+        app.selected_project_index.select(Some(0));
+        let items = vec![];
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| View::show_items(&mut app, &items, f, f.size()))
+            .unwrap();
+
+        assert_eq!(app.selected_project_index.selected(), Some(0));
+    }
+
     #[test]
     fn show_items_with_help_over_notes_or_projects_tolerates_empty_projects() {
         for previous in [ViewMode::ViewNotes, ViewMode::ViewProjects] {

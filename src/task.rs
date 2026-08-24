@@ -12,6 +12,9 @@ use crate::{json::Json, util::Util, App};
 pub struct Task {
     pub title: String,
     pub status: String,
+    /// Pre-0.2.0 data files predate this field; `default` keeps them
+    /// loadable so the `911fc` migration can fill it in.
+    #[serde(default)]
     pub priority: u8,
     #[serde(default)]
     pub created_at: Option<u64>,

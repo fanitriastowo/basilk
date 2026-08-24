@@ -1460,7 +1460,18 @@ impl App {
             ViewMode::ViewNote => return &mut self.selected_note_index,
             ViewMode::EditNote => return &mut self.selected_note_index,
 
-            ViewMode::ViewHelp => return &mut self.selected_project_index,
+            // Help can be opened from any list view; keep the selection
+            // state of the view underneath (see the matching classification
+            // in `View::show_items`). Returning the project state while the
+            // task list is rendered clears the project selection on an empty
+            // list and panics in `Project::get_current` afterwards.
+            ViewMode::ViewHelp => match self.previous_view_mode {
+                ViewMode::ViewProjects => return &mut self.selected_project_index,
+                ViewMode::ViewNotes | ViewMode::ViewNote | ViewMode::EditNote => {
+                    return &mut self.selected_note_index
+                }
+                _ => return &mut self.selected_task_index,
+            },
             ViewMode::InfoMigration => return &mut self.selected_project_index,
         };
     }
@@ -1690,6 +1701,14 @@ mod tests {
         assert_state(&mut app, ViewMode::ViewNote, |a| &a.selected_note_index);
         assert_state(&mut app, ViewMode::EditNote, |a| &a.selected_note_index);
         assert_state(&mut app, ViewMode::DeleteNote, |a| &a.delete_confirm_index);
+
+        // Help keeps the state of the view it was opened from
+        app.previous_view_mode = ViewMode::ViewProjects;
+        assert_state(&mut app, ViewMode::ViewHelp, |a| &a.selected_project_index);
+        app.previous_view_mode = ViewMode::ViewTasks;
+        assert_state(&mut app, ViewMode::ViewHelp, |a| &a.selected_task_index);
+        app.previous_view_mode = ViewMode::ViewNotes;
+        assert_state(&mut app, ViewMode::ViewHelp, |a| &a.selected_note_index);
     }
 
     mod board {

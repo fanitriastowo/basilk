@@ -310,4 +310,29 @@ mod tests {
         assert_eq!(projects[0].tasks[0].priority, TASK_PRIORITY_NONE);
         assert_eq!(projects[0].tasks[0].note, "");
     }
+
+    /// Regression test: the oldest schema (`6ad96`) predates `priority`,
+    /// so its files carry only `title` and `status`. Deserializing them
+    /// must succeed — the migration that adds the field runs *after* the
+    /// parse, so a missing-field error there aborts startup entirely.
+    #[test]
+    fn check_migrates_a_pre_priority_legacy_file() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("BASILK_CONFIG_DIR", dir.path());
+
+        let old_path = Json::get_json_path(JSON_VERSIONS[0].to_string());
+        fs::write(
+            &old_path,
+            r#"[{"title":"legacy","tasks":[{"title":"old task","status":"UpNext"}]}]"#,
+        )
+        .unwrap();
+
+        let migrated = Json::check().unwrap();
+
+        assert!(migrated);
+        let projects = Json::read();
+        assert_eq!(projects[0].tasks[0].title, "old task");
+        assert_eq!(projects[0].tasks[0].priority, TASK_PRIORITY_NONE);
+    }
 }
