@@ -38,12 +38,12 @@ Windows
 ```
 The choice to use the JSON format is to make easier to export
 
-This is a fork of the original [basilk](https://github.com/GabAlpha/basilk) project. For the original version, please refer to the upstream repository.
+This is a fork of the original [basilk](https://github.com/GabAlpha/basilk) project, carrying the feature work from [LiuYinCarl/basilk](https://github.com/LiuYinCarl/basilk) ([upstream PR #27](https://github.com/GabAlpha/basilk/pull/27)). For the original version, please refer to the upstream repository.
 
 ## Installation
 
 ```sh
-git clone https://github.com/LiuYinCarl/basilk && cd basilk
+git clone https://github.com/fanitriastowo/basilk && cd basilk
 cargo install --path .
 ```
 

@@ -38,12 +38,12 @@ Windows
 ```
 选择 JSON 格式是为了方便导出。
 
-本项目是原始 [basilk](https://github.com/GabAlpha/basilk) 的一个 fork 版本。如需原始版本，请参考上游仓库。
+本项目是原始 [basilk](https://github.com/GabAlpha/basilk) 的一个 fork 版本，并合入了 [LiuYinCarl/basilk](https://github.com/LiuYinCarl/basilk) 的功能开发（[上游 PR #27](https://github.com/GabAlpha/basilk/pull/27)）。如需原始版本，请参考上游仓库。
 
 ## 安装
 
 ```sh
-git clone https://github.com/LiuYinCarl/basilk && cd basilk
+git clone https://github.com/fanitriastowo/basilk && cd basilk
 cargo install --path .
 ```
 
