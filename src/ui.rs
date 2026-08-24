@@ -1,19 +1,40 @@
 use ratatui::{
-    layout::{Alignment, Constraint, Layout, Rect},
-    text::{Line, Text},
-    widgets::{Block, Borders, Clear, Paragraph, Widget},
+    layout::{Constraint, Layout, Rect},
+    style::{Color, Style},
+    text::Span,
+    widgets::{Block, Borders, Clear, ListItem, Paragraph, Widget},
     Frame,
 };
 use tui_input::Input;
 
 pub struct Ui {}
 
+/// Row indexes of the delete confirmation modal. "Cancel" is the default
+/// selection so a reflexive `Enter` never deletes anything.
+pub const DELETE_CONFIRM_INDEX: usize = 0;
+pub const DELETE_CANCEL_INDEX: usize = 1;
+
 impl Ui {
+    pub fn load_delete_confirm_items(items: &mut Vec<ListItem>) {
+        items.clear();
+        items.push(ListItem::from(Span::styled(
+            "Confirm",
+            Style::new().fg(Color::Red),
+        )));
+        items.push(ListItem::from(Span::styled(
+            "Cancel",
+            Style::new().fg(Color::Gray),
+        )));
+    }
+
     pub fn create_rect_area(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+        let content_height = percent_y.min(r.height.saturating_sub(2));
+        let vertical_margin = (r.height.saturating_sub(content_height)) / 2;
+
         let popup_layout = Layout::vertical([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Min(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Length(vertical_margin),
+            Constraint::Length(content_height),
+            Constraint::Min(vertical_margin),
         ])
         .split(r);
 
@@ -56,26 +77,5 @@ impl Ui {
             // Move one line down, from the border to the input line
             area.y + 1,
         )
-    }
-
-    pub fn create_question_modal(
-        text_first_line: &str,
-        text_second_line: &str,
-        title: &str,
-        f: &mut Frame,
-        area: Rect,
-    ) {
-        let area = Ui::create_rect_area(20, 4, area);
-
-        f.render_widget(Clear, area); //this clears out the background
-        f.render_widget(
-            Paragraph::new(Text::from(vec![
-                Line::raw(text_first_line),
-                Line::raw(text_second_line),
-            ]))
-            .alignment(Alignment::Center)
-            .block(Block::bordered().title(title)),
-            area,
-        );
     }
 }
