@@ -22,16 +22,56 @@ pub struct View {}
 
 /// Approximate number of lines a paragraph occupies once wrapped to
 /// `width` columns (ratatui 0.27 keeps `Paragraph::line_count` private).
-/// Word wrapping can produce slightly more lines than this estimate;
-/// it is only used to clamp the note preview scroll offset.
+/// It mirrors the greedy word wrapping of `Wrap { trim: false }` rather
+/// than character wrapping, which would undercount — the note preview
+/// clamps its scroll offset to this, so an undercount hides the tail of
+/// a word-dense note.
 fn wrapped_line_count(text: &Text, width: u16) -> usize {
     let width = usize::from(width).max(1);
 
     text.lines
         .iter()
-        .map(|line| line.width().div_ceil(width))
-        .map(|n| n.max(1))
+        .map(|line| {
+            let content: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            word_wrapped_height(&content, width)
+        })
         .sum()
+}
+
+/// Lines a single logical line takes when greedily word-wrapped to
+/// `width`. A word longer than `width` is broken across lines.
+fn word_wrapped_height(content: &str, width: usize) -> usize {
+    let mut lines = 1;
+    let mut used = 0;
+
+    for word in content.split(' ') {
+        let word_width = word.chars().count();
+        let needed = if used == 0 {
+            word_width
+        } else {
+            word_width + 1
+        };
+
+        if used + needed <= width {
+            used += needed;
+            continue;
+        }
+
+        if word_width > width {
+            // Long word: fill the rest of the current line, then as many
+            // whole lines as it needs
+            if used > 0 {
+                lines += 1;
+            }
+            lines += (word_width - 1) / width;
+            used = word_width - ((word_width - 1) / width) * width;
+        } else {
+            lines += 1;
+            used = word_width;
+        }
+    }
+
+    lines
 }
 
 /// One 5-row block glyph for a digit or colon in the big timer readout.
@@ -792,6 +832,19 @@ mod tests {
     /// branch of `show_items` and panic in `Project::get_current` — the
     /// more so because ratatui clears the list selection (`select(None)`)
     /// when rendering an empty list.
+    #[test]
+    fn word_wrapped_height_matches_greedy_word_wrapping() {
+        assert_eq!(word_wrapped_height("", 10), 1);
+        assert_eq!(word_wrapped_height("short", 10), 1);
+        // "aaaa bbbb" is 9 columns: fits; adding "cccc" needs a second line
+        assert_eq!(word_wrapped_height("aaaa bbbb cccc", 10), 2);
+        // A word longer than the width is broken across lines
+        assert_eq!(word_wrapped_height(&"x".repeat(25), 10), 3);
+        // Word wrapping never fits more than character wrapping would
+        let text = "aaaaaa bbbbbb cccccc dddddd";
+        assert!(word_wrapped_height(text, 10) >= text.len().div_ceil(10));
+    }
+
     /// Regression test: help opened over the task view rendered the task
     /// list bound to the *project* `ListState`, so an empty task list (a
     /// project whose only tasks are hidden `Done` ones) cleared the

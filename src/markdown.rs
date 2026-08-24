@@ -26,6 +26,10 @@ struct Renderer {
     style_stack: Vec<Style>,
     /// `Some(n)` = ordered list with next number `n`, `None` = bullets.
     list_stack: Vec<Option<u64>>,
+    /// Display width of the last marker emitted at each list level, so a
+    /// nested item lines up under its parent's text rather than under its
+    /// marker (an ordered `"10. "` is wider than a `"• "` bullet).
+    marker_widths: Vec<usize>,
     quote_depth: usize,
     in_code_block: bool,
     link_url: Option<String>,
@@ -85,11 +89,13 @@ impl Renderer {
                     self.blank_line_before();
                 }
                 self.list_stack.push(start);
+                self.marker_widths.push(2);
             }
             Tag::Item => {
                 self.flush_line();
 
-                let indent = "  ".repeat(self.list_stack.len().saturating_sub(1));
+                let depth = self.list_stack.len().saturating_sub(1);
+                let indent = " ".repeat(self.marker_widths[..depth].iter().sum());
                 let marker = match self.list_stack.last_mut() {
                     Some(Some(n)) => {
                         let m = format!("{}. ", n);
@@ -98,6 +104,9 @@ impl Renderer {
                     }
                     _ => "• ".to_string(),
                 };
+                if let Some(width) = self.marker_widths.last_mut() {
+                    *width = marker.chars().count();
+                }
                 self.spans
                     .push(Span::styled(format!("{}{}", indent, marker), self.style));
             }
@@ -132,6 +141,7 @@ impl Renderer {
             }
             TagEnd::List(_) => {
                 self.list_stack.pop();
+                self.marker_widths.pop();
             }
             TagEnd::Item => self.flush_line(),
             TagEnd::Strong | TagEnd::Emphasis | TagEnd::Strikethrough => self.pop_style(),
@@ -181,7 +191,16 @@ impl Renderer {
 
         if has_content || !self.spans.is_empty() {
             self.flush_line();
-            self.lines.push(Line::default());
+            // Inside a blockquote the separator still belongs to the quote,
+            // so it carries the bar `flush_line` would have prefixed.
+            if self.quote_depth > 0 {
+                self.lines.push(Line::from(Span::styled(
+                    "│ ".repeat(self.quote_depth),
+                    Style::default().fg(Color::DarkGray),
+                )));
+            } else {
+                self.lines.push(Line::default());
+            }
         }
     }
 
@@ -244,6 +263,35 @@ mod tests {
 
     fn rendered_lines(md: &str) -> Vec<String> {
         render_markdown(md).lines.iter().map(line_text).collect()
+    }
+
+    #[test]
+    fn nested_list_indent_follows_the_parent_marker_width() {
+        let text = render_markdown("10. parent\n    - child\n");
+        let child = text
+            .lines
+            .iter()
+            .map(line_text)
+            .find(|l| l.contains("child"))
+            .unwrap();
+
+        assert!(
+            child.starts_with("    • "),
+            "child indents under the parent text, got {child:?}"
+        );
+    }
+
+    /// A blank separator line inside a blockquote still belongs to the
+    /// quote, so it keeps the `│` bar instead of breaking the border.
+    #[test]
+    fn blank_line_inside_a_blockquote_keeps_the_bar() {
+        let text = render_markdown("> para\n>\n> - item\n");
+        let lines: Vec<String> = text.lines.iter().map(line_text).collect();
+
+        assert!(
+            lines.iter().any(|l| l.trim_end() == "│"),
+            "separator inside the quote keeps its bar, got {lines:?}"
+        );
     }
 
     #[test]

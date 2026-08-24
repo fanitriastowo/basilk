@@ -35,7 +35,7 @@ use project::Project;
 use task::{Task, TASK_PRIORITIES, TASK_STATUSES};
 use timer::{TimerKind, TimerState};
 use tui_textarea::TextArea;
-use ui::Ui;
+use ui::{Ui, DELETE_CANCEL_INDEX, DELETE_CONFIRM_INDEX};
 use util::Util;
 use view::View;
 
@@ -149,7 +149,7 @@ impl App {
             selected_task_index: ListState::default().with_selected(Some(0)),
             selected_status_task_index: ListState::default().with_selected(Some(0)),
             selected_priority_task_index: ListState::default().with_selected(Some(0)),
-            delete_confirm_index: ListState::default().with_selected(Some(0)),
+            delete_confirm_index: ListState::default().with_selected(Some(DELETE_CANCEL_INDEX)),
             view_mode: ViewMode::default(),
             previous_view_mode: ViewMode::default(),
             projects: Json::read(),
@@ -329,7 +329,7 @@ impl App {
                     return KeyAction::Skip;
                 }
 
-                App::change_view(self, ViewMode::DeleteProject);
+                self.open_delete_modal(ViewMode::DeleteProject);
             }
             Down | Tab | Char('j') => {
                 self.next(items);
@@ -424,7 +424,7 @@ impl App {
             return KeyAction::Skip;
         }
         if key.code == KeyCode::Enter {
-            if self.delete_confirm_index.selected() == Some(0) {
+            if self.delete_confirm_index.selected() == Some(DELETE_CONFIRM_INDEX) {
                 let deleted_index = self.selected_project_index.selected().unwrap();
 
                 Project::delete(self, items);
@@ -448,7 +448,7 @@ impl App {
                     }
                 }
             }
-            self.delete_confirm_index.select(Some(0));
+            self.delete_confirm_index.select(Some(DELETE_CANCEL_INDEX));
             App::change_view(self, ViewMode::ViewProjects);
         }
         KeyAction::None
@@ -553,7 +553,7 @@ impl App {
                     return KeyAction::Skip;
                 }
 
-                App::change_view(self, ViewMode::DeleteTask);
+                self.open_delete_modal(ViewMode::DeleteTask);
             }
             Char('v') => {
                 if no_current_task {
@@ -744,7 +744,7 @@ impl App {
             return KeyAction::Skip;
         }
         if key.code == KeyCode::Enter {
-            if self.delete_confirm_index.selected() == Some(0) {
+            if self.delete_confirm_index.selected() == Some(DELETE_CONFIRM_INDEX) {
                 // Drop a timer bound to the task being deleted
                 let project_index = self.selected_project_index.selected().unwrap();
                 let task_title = Task::get_current(self).title.clone();
@@ -758,7 +758,7 @@ impl App {
 
                 self.delete_current_task(items);
             }
-            self.delete_confirm_index.select(Some(0));
+            self.delete_confirm_index.select(Some(DELETE_CANCEL_INDEX));
             App::change_view(self, ViewMode::ViewTasks);
         }
         KeyAction::None
@@ -969,7 +969,7 @@ impl App {
                     return KeyAction::Skip;
                 }
 
-                App::change_view(self, ViewMode::DeleteNote);
+                self.open_delete_modal(ViewMode::DeleteNote);
             }
             Down | Tab | Char('j') => {
                 self.next(items);
@@ -1052,10 +1052,10 @@ impl App {
             return KeyAction::Skip;
         }
         if key.code == KeyCode::Enter {
-            if self.delete_confirm_index.selected() == Some(0) {
+            if self.delete_confirm_index.selected() == Some(DELETE_CONFIRM_INDEX) {
                 Note::delete(self, items);
             }
-            self.delete_confirm_index.select(Some(0));
+            self.delete_confirm_index.select(Some(DELETE_CANCEL_INDEX));
             App::change_view(self, ViewMode::ViewNotes);
         }
         KeyAction::None
@@ -1480,6 +1480,14 @@ impl App {
         self.view_mode = mode
     }
 
+    /// Open a delete confirmation modal with "Cancel" selected, so the
+    /// destructive row always needs a deliberate move onto it — including
+    /// when the modal is dismissed with `Esc` and reopened.
+    fn open_delete_modal(&mut self, mode: ViewMode) {
+        self.delete_confirm_index.select(Some(DELETE_CANCEL_INDEX));
+        App::change_view(self, mode);
+    }
+
     /// Stop the active timer (if any). A stopwatch accumulates its seconds
     /// into the bound task; a pomodoro countdown is simply discarded.
     fn settle_timer(&mut self) {
@@ -1577,7 +1585,7 @@ pub(crate) mod test_utils {
             selected_task_index: ListState::default().with_selected(Some(0)),
             selected_status_task_index: ListState::default().with_selected(Some(0)),
             selected_priority_task_index: ListState::default().with_selected(Some(0)),
-            delete_confirm_index: ListState::default().with_selected(Some(0)),
+            delete_confirm_index: ListState::default().with_selected(Some(DELETE_CANCEL_INDEX)),
             view_mode: ViewMode::default(),
             previous_view_mode: ViewMode::default(),
             projects,
@@ -1709,6 +1717,28 @@ mod tests {
         assert_state(&mut app, ViewMode::ViewHelp, |a| &a.selected_task_index);
         app.previous_view_mode = ViewMode::ViewNotes;
         assert_state(&mut app, ViewMode::ViewHelp, |a| &a.selected_note_index);
+    }
+
+    /// Regression test: the delete modal used to open with the
+    /// destructive "Confirm" row selected, so `d` followed by a reflexive
+    /// `Enter` deleted immediately.
+    #[test]
+    fn delete_modals_open_with_cancel_selected() {
+        fn assert_opens_on_cancel(mode: ViewMode) {
+            let mut app = make_app(test_utils::sample_projects());
+            app.delete_confirm_index.select(Some(DELETE_CONFIRM_INDEX));
+
+            app.open_delete_modal(mode);
+
+            assert_eq!(
+                app.delete_confirm_index.selected(),
+                Some(DELETE_CANCEL_INDEX)
+            );
+        }
+
+        assert_opens_on_cancel(ViewMode::DeleteProject);
+        assert_opens_on_cancel(ViewMode::DeleteTask);
+        assert_opens_on_cancel(ViewMode::DeleteNote);
     }
 
     mod board {

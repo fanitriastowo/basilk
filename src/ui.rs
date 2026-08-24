@@ -9,6 +9,11 @@ use tui_input::Input;
 
 pub struct Ui {}
 
+/// Row indexes of the delete confirmation modal. "Cancel" is the default
+/// selection so a reflexive `Enter` never deletes anything.
+pub const DELETE_CONFIRM_INDEX: usize = 0;
+pub const DELETE_CANCEL_INDEX: usize = 1;
+
 impl Ui {
     pub fn load_delete_confirm_items(items: &mut Vec<ListItem>) {
         items.clear();

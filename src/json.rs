@@ -154,9 +154,12 @@ impl Json {
         // Optionally delete old file
         let _ = fs::remove_file(old_path);
 
-        // Re-run check to apply any further migrations
+        // Re-run check to apply any further migrations. Rewriting a legacy
+        // file into the wrapper format is itself a migration, so report one
+        // even when the legacy file already sat at the newest version.
         drop(version_state);
-        Json::check()
+        Json::check()?;
+        Ok(true)
     }
 
     pub fn read() -> Vec<Project> {
@@ -309,6 +312,29 @@ mod tests {
         // Migrations reset priority to NONE and clear the note
         assert_eq!(projects[0].tasks[0].priority, TASK_PRIORITY_NONE);
         assert_eq!(projects[0].tasks[0].note, "");
+    }
+
+    /// A legacy per-version file that already sits at the newest schema
+    /// still gets rewritten into the wrapper format, so the caller must be
+    /// told a migration happened (it drives the `InfoMigration` modal).
+    #[test]
+    fn check_reports_a_migration_when_rewriting_a_current_legacy_file() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("BASILK_CONFIG_DIR", dir.path());
+
+        let projects = vec![Project {
+            title: "legacy".to_string(),
+            tasks: vec![make_task("t", TASK_STATUS_DONE, TASK_PRIORITY_NONE)],
+        }];
+        let old_path = Json::get_json_path(JSON_VERSIONS.last().unwrap().to_string());
+        fs::write(&old_path, to_string(&projects).unwrap()).unwrap();
+
+        let migrated = Json::check().unwrap();
+
+        assert!(migrated, "the format rewrite counts as a migration");
+        assert!(!old_path.is_file());
+        assert_eq!(Json::read(), projects);
     }
 
     /// Regression test: the oldest schema (`6ad96`) predates `priority`,
