@@ -20,6 +20,41 @@ use crate::{
 
 pub struct View {}
 
+/// Number of note lines the task details modal renders before truncating.
+/// The modal is 22 rows tall, so an unbounded note would push the timestamps
+/// and the estimate off screen.
+const NOTE_PREVIEW_LINES: usize = 5;
+
+/// The `Note:` body as it appears in the task details modal: one indented
+/// `Line` per source line, capped at `NOTE_PREVIEW_LINES` with a dim
+/// "N more lines" marker, or a dim placeholder when the note is empty.
+fn note_lines(note: &str) -> Vec<Line<'static>> {
+    let dim = Style::default()
+        .fg(Color::DarkGray)
+        .add_modifier(Modifier::ITALIC);
+
+    if note.trim().is_empty() {
+        return vec![Line::from(Span::styled("  (none)", dim))];
+    }
+
+    let source: Vec<&str> = note.lines().collect();
+    let mut lines: Vec<Line<'static>> = source
+        .iter()
+        .take(NOTE_PREVIEW_LINES)
+        .map(|l| Line::from(Span::raw(format!("  {}", l))))
+        .collect();
+
+    if source.len() > NOTE_PREVIEW_LINES {
+        let hidden = source.len() - NOTE_PREVIEW_LINES;
+        lines.push(Line::from(Span::styled(
+            format!("  … ({} more lines)", hidden),
+            dim,
+        )));
+    }
+
+    lines
+}
+
 /// Approximate number of lines a paragraph occupies once wrapped to
 /// `width` columns (ratatui 0.27 keeps `Paragraph::line_count` private).
 /// It mirrors the greedy word wrapping of `Wrap { trim: false }` rather
@@ -130,8 +165,13 @@ impl View {
         Ui::create_input_modal("Rename", f, area, input)
     }
 
-    pub fn show_edit_note_modal(f: &mut Frame, area: Rect, input: &Input) {
-        Ui::create_input_modal("Note", f, area, input)
+    /// Multi-line task note editor, rendered as a modal over the task view.
+    /// The `tui-textarea` draws its own cursor, so unlike the single-line
+    /// input modals this needs no manual `set_cursor`.
+    pub fn show_edit_task_note_modal(app: &mut App, f: &mut Frame, area: Rect) {
+        if let Some(textarea) = app.task_note_textarea.as_mut() {
+            Ui::create_modal(f, 60, 15, area, &*textarea)
+        }
     }
 
     pub fn show_countdown_modal(f: &mut Frame, area: Rect, input: &Input) {
@@ -499,12 +539,14 @@ impl View {
                 Span::styled(priority_text, Style::default().fg(Color::Red)),
             ]),
             Line::raw(""),
-            Line::from(vec![
-                Span::styled("Note: ", Style::default().fg(Color::Cyan)),
-                Span::raw(&task.note),
-            ]),
-            Line::raw(""),
+            Line::from(vec![Span::styled(
+                "Note:",
+                Style::default().fg(Color::Cyan),
+            )]),
         ];
+
+        lines.extend(note_lines(&task.note));
+        lines.push(Line::raw(""));
 
         // Add creation time if available
         if task.created_at.is_some() {
@@ -661,7 +703,7 @@ impl View {
                 ("n", "new"),
                 ("r", "rename"),
                 ("v", "details"),
-                ("e", "note"),
+                ("e", "note (Esc saves)"),
                 ("v → g", "details: edit estimate"),
                 ("d", "delete"),
                 ("s", "stopwatch timer"),
@@ -678,7 +720,7 @@ impl View {
                 ("n", "new"),
                 ("r", "rename"),
                 ("v", "details"),
-                ("e", "note"),
+                ("e", "note (Esc saves)"),
                 ("v → g", "details: edit estimate"),
                 ("d", "delete"),
                 ("t", "toggle done"),
@@ -813,6 +855,55 @@ mod tests {
         terminal
             .draw(|f| View::show_note(&mut app, f, f.size()))
             .unwrap();
+    }
+
+    #[test]
+    fn show_edit_task_note_modal_renders_without_panicking() {
+        for (width, height) in [(120, 30), (60, 20), (30, 10), (12, 4)] {
+            let mut app = make_app(vec![Project {
+                title: "p".to_string(),
+                tasks: vec![make_task("t", TASK_STATUS_UP_NEXT, 1)],
+            }]);
+            app.task_note_textarea = Some(TextArea::from(
+                (0..30).map(|i| format!("line {}", i)).collect::<Vec<_>>(),
+            ));
+
+            let backend = TestBackend::new(width, height);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|f| View::show_edit_task_note_modal(&mut app, f, f.size()))
+                .unwrap();
+        }
+    }
+
+    /// A long multi-line note must not blow up the fixed-height details modal.
+    #[test]
+    fn show_task_details_modal_renders_a_multi_line_note() {
+        for (width, height) in [(120, 30), (60, 20), (30, 10), (12, 4)] {
+            let mut task = make_task("t", TASK_STATUS_UP_NEXT, 1);
+            task.note = (0..30)
+                .map(|i| format!("note line {}", i))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let mut app = make_app(vec![Project {
+                title: "p".to_string(),
+                tasks: vec![task],
+            }]);
+
+            let backend = TestBackend::new(width, height);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|f| View::show_task_details_modal(&mut app, f, f.size()))
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn note_lines_marks_an_empty_note_and_truncates_a_long_one() {
+        assert_eq!(note_lines("   ").len(), 1);
+        assert_eq!(note_lines("a\nb").len(), 2);
+        // NOTE_PREVIEW_LINES rows plus the "N more lines" marker
+        assert_eq!(note_lines(&"x\n".repeat(20)).len(), NOTE_PREVIEW_LINES + 1);
     }
 
     #[test]

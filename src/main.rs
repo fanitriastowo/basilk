@@ -8,14 +8,17 @@ use std::{
 use cli::Cli;
 use ratatui::{
     crossterm::{
-        event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
+        event::{
+            self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent,
+            KeyEventKind,
+        },
         terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
         ExecutableCommand,
     },
     prelude::*,
     widgets::*,
 };
-use tui_input::{backend::crossterm::EventHandler, Input};
+use tui_input::{backend::crossterm::EventHandler, Input, InputRequest};
 
 mod cli;
 mod json;
@@ -96,6 +99,7 @@ pub struct App {
     note_scroll: u16,
     /// Editor state while `ViewMode::EditNote` is active.
     note_textarea: Option<TextArea<'static>>,
+    task_note_textarea: Option<TextArea<'static>>,
 }
 
 /// What the event loop should do after a key press was handled.
@@ -114,6 +118,9 @@ enum KeyAction {
 fn init_terminal() -> Result<Terminal<impl Backend>, Box<dyn Error>> {
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
+    // Best effort: consoles without bracketed paste support must still start,
+    // they just fall back to paste arriving as individual key events.
+    let _ = stdout().execute(EnableBracketedPaste);
     let backend = CrosstermBackend::new(stdout());
     let terminal = Terminal::new(backend)?;
     Ok(terminal)
@@ -121,6 +128,7 @@ fn init_terminal() -> Result<Terminal<impl Backend>, Box<dyn Error>> {
 
 fn restore_terminal() -> Result<(), Box<dyn Error>> {
     disable_raw_mode()?;
+    let _ = stdout().execute(DisableBracketedPaste);
     stdout().execute(LeaveAlternateScreen)?;
     Ok(())
 }
@@ -166,6 +174,7 @@ impl App {
             selected_note_index: ListState::default().with_selected(Some(0)),
             note_scroll: 0,
             note_textarea: None,
+            task_note_textarea: None,
         }
     }
 
@@ -206,25 +215,31 @@ impl App {
             })?;
 
             if event::poll(Duration::from_millis(250))? {
-                if let Event::Key(key) = event::read()? {
-                    // Capture only the "Press" event to prevent double input on Windows
-                    if key.kind == KeyEventKind::Press {
-                        match self.handle_key(
-                            key,
-                            &mut input,
-                            &mut items,
-                            &status_items,
-                            &priority_items,
-                            &delete_confirm_items,
-                        ) {
-                            KeyAction::Quit => {
-                                self.settle_timer();
-                                return Ok(());
+                match event::read()? {
+                    Event::Key(key) => {
+                        // Capture only the "Press" event to prevent double input on Windows
+                        if key.kind == KeyEventKind::Press {
+                            match self.handle_key(
+                                key,
+                                &mut input,
+                                &mut items,
+                                &status_items,
+                                &priority_items,
+                                &delete_confirm_items,
+                            ) {
+                                KeyAction::Quit => {
+                                    self.settle_timer();
+                                    return Ok(());
+                                }
+                                KeyAction::Skip => continue,
+                                KeyAction::None => {}
                             }
-                            KeyAction::Skip => continue,
-                            KeyAction::None => {}
                         }
                     }
+                    // Bracketed paste: the whole blob arrives at once, so a
+                    // multi-line paste never gets chopped by an `Enter` key
+                    Event::Paste(text) => self.handle_paste(&text, &mut input),
+                    _ => {}
                 }
             }
 
@@ -259,7 +274,7 @@ impl App {
             ViewMode::AddTask => self.handle_add_task(key, input, items),
             ViewMode::DeleteTask => self.handle_delete_task(key, items, delete_confirm_items),
             ViewMode::ViewTaskDetails => self.handle_view_task_details(key, input),
-            ViewMode::EditTaskNote => self.handle_edit_task_note(key, input, items),
+            ViewMode::EditTaskNote => self.handle_edit_task_note(key, items),
             ViewMode::SetTaskEstimate => self.handle_set_task_estimate(key, input, items),
             ViewMode::TimerTask => self.handle_timer_task(key),
             ViewMode::SetCountdown => self.handle_set_countdown(key, input),
@@ -277,6 +292,39 @@ impl App {
                 App::change_view(self, ViewMode::ViewProjects);
                 KeyAction::None
             }
+        }
+    }
+
+    /// Dispatch a bracketed paste to whatever the current view is editing.
+    ///
+    /// The two text areas take the blob verbatim; the single-line `Input`
+    /// modals collapse newlines to spaces so a pasted paragraph cannot end up
+    /// as a title with a literal newline in it.
+    fn handle_paste(&mut self, text: &str, input: &mut Input) {
+        match self.view_mode {
+            ViewMode::EditTaskNote => {
+                if let Some(textarea) = self.task_note_textarea.as_mut() {
+                    textarea.insert_str(text);
+                }
+            }
+            ViewMode::EditNote => {
+                if let Some(textarea) = self.note_textarea.as_mut() {
+                    textarea.insert_str(text);
+                }
+            }
+            ViewMode::AddProject
+            | ViewMode::AddTask
+            | ViewMode::AddNote
+            | ViewMode::RenameProject
+            | ViewMode::RenameTask
+            | ViewMode::RenameNote
+            | ViewMode::SetCountdown
+            | ViewMode::SetTaskEstimate => {
+                for c in text.replace(['\n', '\r'], " ").chars() {
+                    input.handle(InputRequest::InsertChar(c));
+                }
+            }
+            _ => {}
         }
     }
 
@@ -567,11 +615,7 @@ impl App {
                     return KeyAction::Skip;
                 }
 
-                *input = input
-                    .clone()
-                    .with_value(Task::get_current(self).note.clone());
-
-                App::change_view(self, ViewMode::EditTaskNote);
+                self.open_task_note_editor();
             }
             Down | Tab | Char('j') => {
                 if self.board_view {
@@ -768,11 +812,7 @@ impl App {
         use KeyCode::*;
         match key.code {
             Char('e') => {
-                *input = input
-                    .clone()
-                    .with_value(Task::get_current(self).note.clone());
-
-                App::change_view(self, ViewMode::EditTaskNote);
+                self.open_task_note_editor();
             }
             Char('g') => {
                 // Prefill the current estimate; an empty field
@@ -793,28 +833,40 @@ impl App {
         KeyAction::None
     }
 
-    fn handle_edit_task_note(
-        &mut self,
-        key: KeyEvent,
-        input: &mut Input,
-        items: &mut Vec<ListItem>,
-    ) -> KeyAction {
-        use KeyCode::*;
-        match key.code {
-            Enter => {
-                Task::update_note(self, items, input.value());
-                input.reset();
+    /// Seed the multi-line task note editor from the selected task and open it.
+    /// Shared by the task list and the details modal, which both bind `e`.
+    fn open_task_note_editor(&mut self) {
+        let note = Task::get_current(self).note.clone();
+        let mut lines: Vec<String> = note.lines().map(|l| l.to_string()).collect();
+        if lines.is_empty() {
+            lines.push(String::new());
+        }
 
-                App::change_view(self, ViewMode::ViewTaskDetails);
-            }
-            Esc => {
-                input.reset();
+        let mut textarea = TextArea::from(lines);
+        textarea.set_block(Block::bordered().title(" Note — Esc: save & back "));
+        self.task_note_textarea = Some(textarea);
 
-                App::change_view(self, ViewMode::ViewTaskDetails);
+        App::change_view(self, ViewMode::EditTaskNote);
+    }
+
+    /// Multi-line task note editor: `Enter` inserts a newline, `Esc` saves and
+    /// goes back — the same contract as the global note editor.
+    fn handle_edit_task_note(&mut self, key: KeyEvent, items: &mut Vec<ListItem>) -> KeyAction {
+        if key.code == KeyCode::Esc {
+            if let Some(textarea) = self.task_note_textarea.take() {
+                let note = textarea.into_lines().join("\n");
+                // Skip the write when nothing changed
+                if note != Task::get_current(self).note {
+                    Task::update_note(self, items, &note);
+                }
             }
-            _ => {
-                input.handle_event(&Event::Key(key));
-            }
+
+            App::change_view(self, ViewMode::ViewTaskDetails);
+            return KeyAction::None;
+        }
+
+        if let Some(textarea) = self.task_note_textarea.as_mut() {
+            textarea.input(key);
         }
         KeyAction::None
     }
@@ -1262,7 +1314,7 @@ impl App {
             ViewMode::RenameTask | ViewMode::RenameProject | ViewMode::RenameNote => {
                 View::show_rename_item_modal(f, area, input)
             }
-            ViewMode::EditTaskNote => View::show_edit_note_modal(f, area, input),
+            ViewMode::EditTaskNote => View::show_edit_task_note_modal(self, f, area),
             ViewMode::SetCountdown => View::show_countdown_modal(f, area, input),
             ViewMode::SetTaskEstimate => View::show_task_estimate_modal(f, area, input),
             ViewMode::TimerTask => View::show_timer_modal(self, f, area),
@@ -1602,6 +1654,7 @@ pub(crate) mod test_utils {
             selected_note_index: ListState::default().with_selected(Some(0)),
             note_scroll: 0,
             note_textarea: None,
+            task_note_textarea: None,
         }
     }
 
@@ -1638,7 +1691,72 @@ pub(crate) mod test_utils {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use test_utils::make_app;
+    use ratatui::crossterm::event::KeyModifiers;
+    use test_utils::{make_app, make_task, setup_temp_config, ENV_LOCK};
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn app_with_one_task() -> App {
+        make_app(vec![Project {
+            title: "p".to_string(),
+            tasks: vec![make_task("t", task::TASK_STATUS_UP_NEXT, 1)],
+        }])
+    }
+
+    /// The reported bug: a pasted multi-line note used to be cut at the first
+    /// newline, because `Enter` saved and closed the single-line modal.
+    #[test]
+    fn editing_a_task_note_keeps_every_line() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let _dir = setup_temp_config();
+        let mut app = app_with_one_task();
+        let mut items = vec![];
+        let mut input = Input::default();
+
+        app.open_task_note_editor();
+        assert_eq!(app.view_mode, ViewMode::EditTaskNote);
+
+        app.handle_paste("line one\nline two", &mut input);
+        // `Enter` now inserts a newline instead of closing the editor
+        app.handle_edit_task_note(key(KeyCode::Enter), &mut items);
+        app.handle_edit_task_note(key(KeyCode::Char('x')), &mut items);
+        assert_eq!(app.view_mode, ViewMode::EditTaskNote);
+
+        app.handle_edit_task_note(key(KeyCode::Esc), &mut items);
+
+        assert_eq!(app.view_mode, ViewMode::ViewTaskDetails);
+        assert_eq!(Task::get_current(&mut app).note, "line one\nline two\nx");
+        assert!(app.task_note_textarea.is_none());
+    }
+
+    /// Reopening the editor must round-trip the stored newlines.
+    #[test]
+    fn open_task_note_editor_seeds_every_stored_line() {
+        let mut app = app_with_one_task();
+        app.projects[0].tasks[0].note = "a\nb\nc".to_string();
+
+        app.open_task_note_editor();
+
+        assert_eq!(
+            app.task_note_textarea.unwrap().lines(),
+            ["a".to_string(), "b".to_string(), "c".to_string()]
+        );
+    }
+
+    /// A single-line modal must never end up holding a literal newline,
+    /// which would break the task list rendering.
+    #[test]
+    fn paste_into_a_single_line_modal_collapses_newlines() {
+        let mut app = make_app(vec![]);
+        let mut input = Input::default();
+        app.view_mode = ViewMode::AddTask;
+
+        app.handle_paste("first\nsecond\r\nthird", &mut input);
+
+        assert_eq!(input.value(), "first second  third");
+    }
 
     #[test]
     fn next_on_empty_items_does_not_panic() {
