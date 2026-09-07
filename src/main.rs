@@ -85,13 +85,13 @@ pub struct App {
     projects: Vec<Project>,
     hide_done_tasks: bool,
     timer: Option<TimerState>,
-    /// When true, the task view renders as a three-lane kanban board
-    /// (Up Next / On Going / Done) instead of the classic list.
+    /// When true, the task view renders as a four-lane kanban board
+    /// (Up Next / On Going / Pending / Done) instead of the classic list.
     board_view: bool,
     /// Currently focused board lane: index into `TASK_STATUSES`.
     board_lane: usize,
     /// Per-lane selection/scroll state for the board view.
-    board_lane_states: [ListState; 3],
+    board_lane_states: [ListState; 4],
     /// Global notes, independent of projects.
     notes: Vec<Note>,
     selected_note_index: ListState,
@@ -166,6 +166,7 @@ impl App {
             board_view: false,
             board_lane: 0,
             board_lane_states: [
+                ListState::default().with_selected(Some(0)),
                 ListState::default().with_selected(Some(0)),
                 ListState::default().with_selected(Some(0)),
                 ListState::default().with_selected(Some(0)),
@@ -1649,6 +1650,7 @@ pub(crate) mod test_utils {
                 ListState::default().with_selected(Some(0)),
                 ListState::default().with_selected(Some(0)),
                 ListState::default().with_selected(Some(0)),
+                ListState::default().with_selected(Some(0)),
             ],
             notes: vec![],
             selected_note_index: ListState::default().with_selected(Some(0)),
@@ -1862,7 +1864,8 @@ mod tests {
     mod board {
         use super::*;
         use crate::task::{
-            TASK_PRIORITY_NONE, TASK_STATUS_DONE, TASK_STATUS_ON_GOING, TASK_STATUS_UP_NEXT,
+            TASK_PRIORITY_NONE, TASK_STATUS_DONE, TASK_STATUS_ON_GOING, TASK_STATUS_PENDING,
+            TASK_STATUS_UP_NEXT,
         };
         use test_utils::{make_task, setup_temp_config, ENV_LOCK};
 
@@ -1872,6 +1875,7 @@ mod tests {
                 tasks: vec![
                     make_task("ongoing", TASK_STATUS_ON_GOING, TASK_PRIORITY_NONE),
                     make_task("upnext", TASK_STATUS_UP_NEXT, TASK_PRIORITY_NONE),
+                    make_task("pending", TASK_STATUS_PENDING, TASK_PRIORITY_NONE),
                     make_task("done", TASK_STATUS_DONE, TASK_PRIORITY_NONE),
                 ],
             }])
@@ -1884,7 +1888,7 @@ mod tests {
 
             app.board_sync();
 
-            // TASK_STATUSES order: UpNext = 0, OnGoing = 1, Done = 2
+            // TASK_STATUSES order: UpNext = 0, OnGoing = 1, Pending = 2, Done = 3
             assert_eq!(app.board_lane, 1);
             assert_eq!(app.board_lane_states[1].selected(), Some(0));
         }
@@ -1902,9 +1906,9 @@ mod tests {
             // The selection follows the task into the Done lane instead of
             // jumping to the first still-visible list item
             assert_eq!(Task::get_current(&mut app).title, "ongoing");
-            assert_eq!(app.board_lane, 2);
-            assert_eq!(app.selected_task_index.selected(), Some(1));
-            assert_eq!(app.board_lane_states[2].selected(), Some(0));
+            assert_eq!(app.board_lane, 3);
+            assert_eq!(app.selected_task_index.selected(), Some(2));
+            assert_eq!(app.board_lane_states[3].selected(), Some(0));
         }
 
         #[test]
@@ -1914,7 +1918,8 @@ mod tests {
 
             assert_eq!(Task::lane_indices(&app, TASK_STATUS_UP_NEXT), vec![1]);
             assert_eq!(Task::lane_indices(&app, TASK_STATUS_ON_GOING), vec![0]);
-            assert_eq!(Task::lane_indices(&app, TASK_STATUS_DONE), vec![2]);
+            assert_eq!(Task::lane_indices(&app, TASK_STATUS_PENDING), vec![2]);
+            assert_eq!(Task::lane_indices(&app, TASK_STATUS_DONE), vec![3]);
         }
 
         #[test]
@@ -1923,17 +1928,21 @@ mod tests {
             app.selected_task_index.select(Some(0));
             app.board_sync(); // lane 1 (OnGoing)
 
-            app.board_switch_lane(true); // lane 2 (Done)
+            app.board_switch_lane(true); // lane 2 (Pending)
             assert_eq!(app.board_lane, 2);
             assert_eq!(app.selected_task_index.selected(), Some(2));
+
+            app.board_switch_lane(true); // lane 3 (Done)
+            assert_eq!(app.board_lane, 3);
+            assert_eq!(app.selected_task_index.selected(), Some(3));
 
             app.board_switch_lane(true); // wraps to lane 0 (UpNext)
             assert_eq!(app.board_lane, 0);
             assert_eq!(app.selected_task_index.selected(), Some(1));
 
-            app.board_switch_lane(false); // back to lane 2 (Done)
-            assert_eq!(app.board_lane, 2);
-            assert_eq!(app.selected_task_index.selected(), Some(2));
+            app.board_switch_lane(false); // back to lane 3 (Done)
+            assert_eq!(app.board_lane, 3);
+            assert_eq!(app.selected_task_index.selected(), Some(3));
         }
 
         #[test]

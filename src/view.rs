@@ -11,7 +11,7 @@ use crate::{
     markdown::render_markdown,
     note::Note,
     project::Project,
-    task::{Task, TASK_PRIORITY_NONE, TASK_STATUSES},
+    task::{Task, TASK_PRIORITIES, TASK_PRIORITY_NONE, TASK_STATUSES},
     timer::TimerKind,
     ui::Ui,
     util::Util,
@@ -329,7 +329,9 @@ impl View {
         f: &mut Frame,
         area: Rect,
     ) {
-        let area = Ui::create_rect_area(20, 5, area);
+        // One row per status plus the two border rows, so the list never
+        // has to scroll when a status is added.
+        let area = Ui::create_rect_area(20, TASK_STATUSES.len() as u16 + 2, area);
 
         let task_status_list_widget = List::new(status_items.clone())
             .highlight_style(Style::default().add_modifier(Modifier::BOLD))
@@ -347,7 +349,7 @@ impl View {
         f: &mut Frame,
         area: Rect,
     ) {
-        let area = Ui::create_rect_area(20, 6, area);
+        let area = Ui::create_rect_area(20, TASK_PRIORITIES.len() as u16 + 2, area);
 
         let task_status_list_widget = List::new(priority_items.clone())
             .highlight_style(Style::default().add_modifier(Modifier::BOLD))
@@ -428,17 +430,18 @@ impl View {
     /// lane gets the status color for its border and title; every lane is
     /// always shown (the Done lane ignores `hide_done_tasks`).
     pub fn show_board(app: &mut App, f: &mut Frame, area: Rect) {
-        const LANE_TITLES: [&str; 3] = ["Up Next", "On Going", "Done"];
+        const LANE_TITLES: [&str; 4] = ["Up Next", "On Going", "Pending", "Done"];
 
         let outer =
             Block::bordered().title(Util::get_spaced_title(&Project::get_current(app).title));
         let inner = outer.inner(area);
         f.render_widget(outer, area);
 
-        let columns = Layout::horizontal([
-            Constraint::Ratio(1, 3),
-            Constraint::Ratio(1, 3),
-            Constraint::Ratio(1, 3),
+        // One equal column per status, derived from the status list so a
+        // new status needs no layout edit here.
+        let columns = Layout::horizontal(vec![
+            Constraint::Ratio(1, TASK_STATUSES.len() as u32);
+            TASK_STATUSES.len()
         ])
         .spacing(1)
         .split(inner);

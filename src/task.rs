@@ -31,15 +31,25 @@ pub struct Task {
 
 pub const TASK_STATUS_DONE: &str = "Done";
 pub const TASK_STATUS_ON_GOING: &str = "OnGoing";
+pub const TASK_STATUS_PENDING: &str = "Pending";
 pub const TASK_STATUS_UP_NEXT: &str = "UpNext";
 
 pub const TASK_PRIORITY_NONE: u8 = 0;
 
-pub const TASK_STATUSES: [&'static str; 3] =
-    [TASK_STATUS_UP_NEXT, TASK_STATUS_ON_GOING, TASK_STATUS_DONE];
+pub const TASK_STATUSES: [&'static str; 4] = [
+    TASK_STATUS_UP_NEXT,
+    TASK_STATUS_ON_GOING,
+    TASK_STATUS_PENDING,
+    TASK_STATUS_DONE,
+];
 
-const TASK_STATUSES_SORT_ORDER: [&'static str; 3] =
-    [TASK_STATUS_ON_GOING, TASK_STATUS_UP_NEXT, TASK_STATUS_DONE];
+// Active work first, then what is queued, then what is blocked; done last.
+const TASK_STATUSES_SORT_ORDER: [&'static str; 4] = [
+    TASK_STATUS_ON_GOING,
+    TASK_STATUS_UP_NEXT,
+    TASK_STATUS_PENDING,
+    TASK_STATUS_DONE,
+];
 
 // Ascending order: 1 highest priority; 2 medium; 3 lowest; TASK_PRIORITY_NONE = no priority
 pub const TASK_PRIORITIES: [u8; 4] = [1, 2, 3, TASK_PRIORITY_NONE];
@@ -49,6 +59,7 @@ impl Task {
         match status.as_str() {
             TASK_STATUS_DONE => return Color::LightGreen,
             TASK_STATUS_ON_GOING => return Color::Yellow,
+            TASK_STATUS_PENDING => return Color::LightBlue,
             TASK_STATUS_UP_NEXT => return Color::LightMagenta,
             _ => return Color::Gray,
         }
@@ -554,6 +565,7 @@ mod tests {
         let mut app = app_with_tasks(vec![
             make_task("done-task", TASK_STATUS_DONE, TASK_PRIORITY_NONE),
             make_task("up-next-low", TASK_STATUS_UP_NEXT, 3),
+            make_task("pending", TASK_STATUS_PENDING, TASK_PRIORITY_NONE),
             make_task("on-going", TASK_STATUS_ON_GOING, TASK_PRIORITY_NONE),
             make_task("up-next-high", TASK_STATUS_UP_NEXT, 1),
         ]);
@@ -568,11 +580,56 @@ mod tests {
             .map(|t| t.title.as_str())
             .collect();
         // Priority is the primary key (1, 3, then NONE); within the NONE
-        // group the status order applies, so done tasks come last.
+        // group the status order applies, so pending sits between the
+        // active work and the done tasks, which come last.
         assert_eq!(
             titles,
-            vec!["up-next-high", "up-next-low", "on-going", "done-task"]
+            vec![
+                "up-next-high",
+                "up-next-low",
+                "on-going",
+                "pending",
+                "done-task"
+            ]
         );
+    }
+
+    #[test]
+    fn get_status_color_maps_every_status() {
+        assert_eq!(
+            Task::get_status_color(&TASK_STATUS_UP_NEXT.to_string()),
+            Color::LightMagenta
+        );
+        assert_eq!(
+            Task::get_status_color(&TASK_STATUS_ON_GOING.to_string()),
+            Color::Yellow
+        );
+        assert_eq!(
+            Task::get_status_color(&TASK_STATUS_PENDING.to_string()),
+            Color::LightBlue
+        );
+        assert_eq!(
+            Task::get_status_color(&TASK_STATUS_DONE.to_string()),
+            Color::LightGreen
+        );
+        assert_eq!(Task::get_status_color(&"Bogus".to_string()), Color::Gray);
+    }
+
+    #[test]
+    fn change_status_to_pending_clears_completed_at() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let _dir = setup_temp_config();
+
+        let mut task = make_task("t", TASK_STATUS_DONE, TASK_PRIORITY_NONE);
+        task.completed_at = Some(1);
+        let mut app = app_with_tasks(vec![task]);
+        let mut items = vec![];
+
+        Task::change_status(&mut app, &mut items, TASK_STATUS_PENDING);
+
+        let task = &app.projects[0].tasks[0];
+        assert_eq!(task.status, TASK_STATUS_PENDING);
+        assert_eq!(task.completed_at, None);
     }
 
     #[test]

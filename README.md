@@ -23,7 +23,7 @@ The name [_/ˈbæzsɪlk/_](https://gabalpha.github.io/read-audio/?p=https://gith
 </details>
 
 ## About
-**basilk** is structured to create projects and within each project to create tasks with a specific status (Up Next/On Going/Done).
+**basilk** is structured to create projects and within each project to create tasks with a specific status (Up Next/On Going/Pending/Done).
 
 The data structure is saved in `.json` format and is available in the directory:
 ```
@@ -160,12 +160,12 @@ The timer keeps running while you navigate (even back to the project list); it s
 - **Pomodoro** (`c`, both views): a global countdown for focus sessions; at zero it rings the terminal bell and stays on screen (showing `time's up!`) until you press any key. It is not tied to any task, so nothing is accumulated.
 
 Tasks are displayed as `[Status] Title` with optional `[Priority]` prefix and, for tasks with an estimate set, a `[x%]` suffix showing how much of the estimate has been spent (red once it reaches 100%).
-- Statuses: **UpNext** (magenta), **OnGoing** (yellow), **Done** (green, ~~crossed out~~)
+- Statuses: **UpNext** (magenta), **OnGoing** (yellow), **Pending** (blue), **Done** (green, ~~crossed out~~)
 - Priorities: `!` (highest), `!!` (high), `!!!` (low)
 
 Completed tasks are **hidden by default** in the task list view. Press `t` to toggle their visibility.
 
-Press `b` in the task list view to switch to a kanban **board view**: three vertical lanes (**Up Next** / **On Going** / **Done**), each titled with its task count, the focused lane highlighted in its status color. Use `←`/`→` to move between lanes and `↑`/`↓` to select a task within a lane; every other shortcut (`v` details, `Enter` status, `p` priority, timers, …) works the same, and changing a task's status moves it to the matching lane. The board always shows the Done lane, regardless of the `t` setting (which is a no-op while the board is active).
+Press `b` in the task list view to switch to a kanban **board view**: four vertical lanes (**Up Next** / **On Going** / **Pending** / **Done**), each titled with its task count, the focused lane highlighted in its status color. Use `←`/`→` to move between lanes and `↑`/`↓` to select a task within a lane; every other shortcut (`v` details, `Enter` status, `p` priority, timers, …) works the same, and changing a task's status moves it to the matching lane. The board always shows the Done lane, regardless of the `t` setting (which is a no-op while the board is active).
 
 Press `m` in the project list view to open **notes**: global, project-independent memos. A note is a titled entry whose body is Markdown; opening one shows a full-page rendered preview (headings, bold/italic, code blocks, lists, quotes, links), and `e` switches to a full-page multi-line editor for the Markdown source (`Esc` saves and returns to the preview).
 
