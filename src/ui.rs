@@ -1,5 +1,5 @@
 use ratatui::{
-    layout::{Constraint, Layout, Rect},
+    layout::{Constraint, Layout, Position, Rect},
     style::{Color, Style},
     text::Span,
     widgets::{Block, Borders, Clear, ListItem, Paragraph, Widget},
@@ -71,11 +71,11 @@ impl Ui {
         f.render_widget(Clear, area); //this clears out the background
         f.render_widget(input_widget, area);
 
-        f.set_cursor(
+        f.set_cursor_position(Position::new(
             // Put cursor past the end of the input text
             area.x + ((input.visual_cursor()).max(scroll) - scroll) as u16 + 1,
             // Move one line down, from the border to the input line
             area.y + 1,
-        )
+        ))
     }
 }

@@ -35,9 +35,9 @@ mod view;
 use json::Json;
 use note::Note;
 use project::Project;
+use ratatui_textarea::TextArea;
 use task::{Task, TASK_PRIORITIES, TASK_STATUSES};
 use timer::{TimerKind, TimerState};
-use tui_textarea::TextArea;
 use ui::{Ui, DELETE_CANCEL_INDEX, DELETE_CONFIRM_INDEX};
 use util::Util;
 use view::View;
@@ -85,13 +85,14 @@ pub struct App {
     projects: Vec<Project>,
     hide_done_tasks: bool,
     timer: Option<TimerState>,
-    /// When true, the task view renders as a four-lane kanban board
-    /// (Up Next / On Going / Pending / Done) instead of the classic list.
+    /// When true, the task view renders as a five-lane kanban board
+    /// (Up Next / On Going / Testing / Pending / Done) instead of the classic
+    /// list.
     board_view: bool,
     /// Currently focused board lane: index into `TASK_STATUSES`.
     board_lane: usize,
     /// Per-lane selection/scroll state for the board view.
-    board_lane_states: [ListState; 4],
+    board_lane_states: [ListState; 5],
     /// Global notes, independent of projects.
     notes: Vec<Note>,
     selected_note_index: ListState,
@@ -115,7 +116,7 @@ enum KeyAction {
     Quit,
 }
 
-fn init_terminal() -> Result<Terminal<impl Backend>, Box<dyn Error>> {
+fn init_terminal() -> Result<Terminal<impl Backend<Error = io::Error>>, Box<dyn Error>> {
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     // Best effort: consoles without bracketed paste support must still start,
@@ -170,6 +171,7 @@ impl App {
                 ListState::default().with_selected(Some(0)),
                 ListState::default().with_selected(Some(0)),
                 ListState::default().with_selected(Some(0)),
+                ListState::default().with_selected(Some(0)),
             ],
             notes: Json::read_notes(),
             selected_note_index: ListState::default().with_selected(Some(0)),
@@ -181,7 +183,7 @@ impl App {
 
     fn run(
         &mut self,
-        mut terminal: Terminal<impl Backend>,
+        mut terminal: Terminal<impl Backend<Error = io::Error>>,
         were_applied_migrations: bool,
     ) -> io::Result<()> {
         let mut input = Input::default();
@@ -206,7 +208,7 @@ impl App {
             terminal.draw(|f| {
                 self.render(
                     f,
-                    f.size(),
+                    f.area(),
                     &input,
                     &items,
                     &status_items,
@@ -1651,6 +1653,7 @@ pub(crate) mod test_utils {
                 ListState::default().with_selected(Some(0)),
                 ListState::default().with_selected(Some(0)),
                 ListState::default().with_selected(Some(0)),
+                ListState::default().with_selected(Some(0)),
             ],
             notes: vec![],
             selected_note_index: ListState::default().with_selected(Some(0)),
@@ -1865,7 +1868,7 @@ mod tests {
         use super::*;
         use crate::task::{
             TASK_PRIORITY_NONE, TASK_STATUS_DONE, TASK_STATUS_ON_GOING, TASK_STATUS_PENDING,
-            TASK_STATUS_UP_NEXT,
+            TASK_STATUS_TESTING, TASK_STATUS_UP_NEXT,
         };
         use test_utils::{make_task, setup_temp_config, ENV_LOCK};
 
@@ -1874,6 +1877,7 @@ mod tests {
                 title: "p".to_string(),
                 tasks: vec![
                     make_task("ongoing", TASK_STATUS_ON_GOING, TASK_PRIORITY_NONE),
+                    make_task("testing", TASK_STATUS_TESTING, TASK_PRIORITY_NONE),
                     make_task("upnext", TASK_STATUS_UP_NEXT, TASK_PRIORITY_NONE),
                     make_task("pending", TASK_STATUS_PENDING, TASK_PRIORITY_NONE),
                     make_task("done", TASK_STATUS_DONE, TASK_PRIORITY_NONE),
@@ -1888,7 +1892,8 @@ mod tests {
 
             app.board_sync();
 
-            // TASK_STATUSES order: UpNext = 0, OnGoing = 1, Pending = 2, Done = 3
+            // TASK_STATUSES order: UpNext = 0, OnGoing = 1, Testing = 2,
+            // Pending = 3, Done = 4
             assert_eq!(app.board_lane, 1);
             assert_eq!(app.board_lane_states[1].selected(), Some(0));
         }
@@ -1906,9 +1911,9 @@ mod tests {
             // The selection follows the task into the Done lane instead of
             // jumping to the first still-visible list item
             assert_eq!(Task::get_current(&mut app).title, "ongoing");
-            assert_eq!(app.board_lane, 3);
-            assert_eq!(app.selected_task_index.selected(), Some(2));
-            assert_eq!(app.board_lane_states[3].selected(), Some(0));
+            assert_eq!(app.board_lane, 4);
+            assert_eq!(app.selected_task_index.selected(), Some(3));
+            assert_eq!(app.board_lane_states[4].selected(), Some(0));
         }
 
         #[test]
@@ -1916,10 +1921,11 @@ mod tests {
             let app = board_app();
             assert!(app.hide_done_tasks);
 
-            assert_eq!(Task::lane_indices(&app, TASK_STATUS_UP_NEXT), vec![1]);
+            assert_eq!(Task::lane_indices(&app, TASK_STATUS_UP_NEXT), vec![2]);
             assert_eq!(Task::lane_indices(&app, TASK_STATUS_ON_GOING), vec![0]);
-            assert_eq!(Task::lane_indices(&app, TASK_STATUS_PENDING), vec![2]);
-            assert_eq!(Task::lane_indices(&app, TASK_STATUS_DONE), vec![3]);
+            assert_eq!(Task::lane_indices(&app, TASK_STATUS_TESTING), vec![1]);
+            assert_eq!(Task::lane_indices(&app, TASK_STATUS_PENDING), vec![3]);
+            assert_eq!(Task::lane_indices(&app, TASK_STATUS_DONE), vec![4]);
         }
 
         #[test]
@@ -1928,21 +1934,25 @@ mod tests {
             app.selected_task_index.select(Some(0));
             app.board_sync(); // lane 1 (OnGoing)
 
-            app.board_switch_lane(true); // lane 2 (Pending)
+            app.board_switch_lane(true); // lane 2 (Testing)
             assert_eq!(app.board_lane, 2);
-            assert_eq!(app.selected_task_index.selected(), Some(2));
+            assert_eq!(app.selected_task_index.selected(), Some(1));
 
-            app.board_switch_lane(true); // lane 3 (Done)
+            app.board_switch_lane(true); // lane 3 (Pending)
             assert_eq!(app.board_lane, 3);
             assert_eq!(app.selected_task_index.selected(), Some(3));
+
+            app.board_switch_lane(true); // lane 4 (Done)
+            assert_eq!(app.board_lane, 4);
+            assert_eq!(app.selected_task_index.selected(), Some(4));
 
             app.board_switch_lane(true); // wraps to lane 0 (UpNext)
             assert_eq!(app.board_lane, 0);
-            assert_eq!(app.selected_task_index.selected(), Some(1));
+            assert_eq!(app.selected_task_index.selected(), Some(2));
 
-            app.board_switch_lane(false); // back to lane 3 (Done)
-            assert_eq!(app.board_lane, 3);
-            assert_eq!(app.selected_task_index.selected(), Some(3));
+            app.board_switch_lane(false); // back to lane 4 (Done)
+            assert_eq!(app.board_lane, 4);
+            assert_eq!(app.selected_task_index.selected(), Some(4));
         }
 
         #[test]
@@ -1950,7 +1960,7 @@ mod tests {
             let mut app = board_app();
             app.projects[0]
                 .tasks
-                .retain(|t| t.status != TASK_STATUS_ON_GOING);
+                .retain(|t| t.status != TASK_STATUS_ON_GOING && t.status != TASK_STATUS_TESTING);
             app.selected_task_index.select(Some(0)); // "upnext"
             app.board_sync();
             assert_eq!(app.board_lane, 0);

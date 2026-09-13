@@ -8,7 +8,8 @@ use proptest::prelude::*;
 use crate::migration::{Migration, JSON_VERSIONS};
 use crate::project::Project;
 use crate::task::{
-    Task, TASK_STATUS_DONE, TASK_STATUS_ON_GOING, TASK_STATUS_PENDING, TASK_STATUS_UP_NEXT,
+    Task, TASK_STATUS_DONE, TASK_STATUS_ON_GOING, TASK_STATUS_PENDING, TASK_STATUS_TESTING,
+    TASK_STATUS_UP_NEXT,
 };
 use crate::test_utils::make_app;
 use crate::util::Util;
@@ -18,6 +19,7 @@ fn arb_status() -> impl Strategy<Value = String> {
         TASK_STATUS_UP_NEXT.to_string(),
         TASK_STATUS_ON_GOING.to_string(),
         TASK_STATUS_PENDING.to_string(),
+        TASK_STATUS_TESTING.to_string(),
         TASK_STATUS_DONE.to_string(),
         // Unknown status values must not crash anything
         "Bogus".to_string(),

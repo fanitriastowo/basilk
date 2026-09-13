@@ -166,7 +166,7 @@ impl View {
     }
 
     /// Multi-line task note editor, rendered as a modal over the task view.
-    /// The `tui-textarea` draws its own cursor, so unlike the single-line
+    /// The `ratatui-textarea` draws its own cursor, so unlike the single-line
     /// input modals this needs no manual `set_cursor`.
     pub fn show_edit_task_note_modal(app: &mut App, f: &mut Frame, area: Rect) {
         if let Some(textarea) = app.task_note_textarea.as_mut() {
@@ -430,7 +430,7 @@ impl View {
     /// lane gets the status color for its border and title; every lane is
     /// always shown (the Done lane ignores `hide_done_tasks`).
     pub fn show_board(app: &mut App, f: &mut Frame, area: Rect) {
-        const LANE_TITLES: [&str; 4] = ["Up Next", "On Going", "Pending", "Done"];
+        const LANE_TITLES: [&str; 5] = ["Up Next", "On Going", "Testing", "Pending", "Done"];
 
         let outer =
             Block::bordered().title(Util::get_spaced_title(&Project::get_current(app).title));
@@ -656,7 +656,7 @@ impl View {
         f.render_widget(paragraph.scroll((app.note_scroll, 0)), area);
     }
 
-    /// Full-page note editor: the `tui-textarea` created when entering
+    /// Full-page note editor: the `ratatui-textarea` created when entering
     /// `ViewMode::EditNote`, rendered with its own block and cursor.
     pub fn show_note_editor(app: &mut App, f: &mut Frame, area: Rect) {
         if let Some(textarea) = app.note_textarea.as_mut() {
@@ -778,7 +778,7 @@ mod tests {
         test_utils::{make_app, make_task, sample_projects},
     };
     use ratatui::{backend::TestBackend, Terminal};
-    use tui_textarea::TextArea;
+    use ratatui_textarea::TextArea;
 
     /// Rendering must not panic on any lane composition (all lanes filled,
     /// some empty, board narrower than the content).
@@ -799,7 +799,7 @@ mod tests {
             let backend = TestBackend::new(width, height);
             let mut terminal = Terminal::new(backend).unwrap();
             terminal
-                .draw(|f| View::show_board(&mut app, f, f.size()))
+                .draw(|f| View::show_board(&mut app, f, f.area()))
                 .unwrap();
         }
     }
@@ -816,7 +816,7 @@ mod tests {
         let backend = TestBackend::new(90, 20);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|f| View::show_board(&mut app, f, f.size()))
+            .draw(|f| View::show_board(&mut app, f, f.area()))
             .unwrap();
     }
 
@@ -842,7 +842,7 @@ mod tests {
             let backend = TestBackend::new(width, height);
             let mut terminal = Terminal::new(backend).unwrap();
             terminal
-                .draw(|f| View::show_note(&mut app, f, f.size()))
+                .draw(|f| View::show_note(&mut app, f, f.area()))
                 .unwrap();
 
             assert!(app.note_scroll < u16::MAX);
@@ -856,7 +856,7 @@ mod tests {
         let backend = TestBackend::new(60, 20);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|f| View::show_note(&mut app, f, f.size()))
+            .draw(|f| View::show_note(&mut app, f, f.area()))
             .unwrap();
     }
 
@@ -874,7 +874,7 @@ mod tests {
             let backend = TestBackend::new(width, height);
             let mut terminal = Terminal::new(backend).unwrap();
             terminal
-                .draw(|f| View::show_edit_task_note_modal(&mut app, f, f.size()))
+                .draw(|f| View::show_edit_task_note_modal(&mut app, f, f.area()))
                 .unwrap();
         }
     }
@@ -896,7 +896,7 @@ mod tests {
             let backend = TestBackend::new(width, height);
             let mut terminal = Terminal::new(backend).unwrap();
             terminal
-                .draw(|f| View::show_task_details_modal(&mut app, f, f.size()))
+                .draw(|f| View::show_task_details_modal(&mut app, f, f.area()))
                 .unwrap();
         }
     }
@@ -917,7 +917,7 @@ mod tests {
         let backend = TestBackend::new(60, 20);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|f| View::show_note_editor(&mut app, f, f.size()))
+            .draw(|f| View::show_note_editor(&mut app, f, f.area()))
             .unwrap();
     }
 
@@ -954,7 +954,7 @@ mod tests {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|f| View::show_items(&mut app, &items, f, f.size()))
+            .draw(|f| View::show_items(&mut app, &items, f, f.area()))
             .unwrap();
 
         assert_eq!(app.selected_project_index.selected(), Some(0));
@@ -972,7 +972,7 @@ mod tests {
             let backend = TestBackend::new(80, 24);
             let mut terminal = Terminal::new(backend).unwrap();
             terminal
-                .draw(|f| View::show_items(&mut app, &items, f, f.size()))
+                .draw(|f| View::show_items(&mut app, &items, f, f.area()))
                 .unwrap();
         }
     }
