@@ -26,6 +26,7 @@ mod markdown;
 mod migration;
 mod note;
 mod project;
+mod selection;
 mod task;
 mod timer;
 mod ui;
@@ -36,6 +37,7 @@ use json::Json;
 use note::Note;
 use project::Project;
 use ratatui_textarea::TextArea;
+use selection::{Board, Selection};
 use task::{Task, TASK_PRIORITIES, TASK_STATUSES};
 use timer::{TimerKind, TimerState};
 use ui::{Ui, DELETE_CANCEL_INDEX, DELETE_CONFIRM_INDEX};
@@ -74,12 +76,11 @@ pub enum ViewMode {
 }
 
 pub struct App {
-    // TODO: Better list state mgmt
-    selected_project_index: ListState,
-    selected_task_index: ListState,
-    selected_status_task_index: ListState,
-    selected_priority_task_index: ListState,
-    delete_confirm_index: ListState,
+    selected_project_index: Selection,
+    selected_task_index: Selection,
+    selected_status_task_index: Selection,
+    selected_priority_task_index: Selection,
+    delete_confirm_index: Selection,
     view_mode: ViewMode,
     previous_view_mode: ViewMode,
     projects: Vec<Project>,
@@ -89,13 +90,11 @@ pub struct App {
     /// (Up Next / On Going / Testing / Pending / Done) instead of the classic
     /// list.
     board_view: bool,
-    /// Currently focused board lane: index into `TASK_STATUSES`.
-    board_lane: usize,
-    /// Per-lane selection/scroll state for the board view.
-    board_lane_states: [ListState; 5],
+    /// Focused lane plus one remembered row per lane.
+    board: Board,
     /// Global notes, independent of projects.
     notes: Vec<Note>,
-    selected_note_index: ListState,
+    selected_note_index: Selection,
     /// Vertical scroll offset of the note preview page.
     note_scroll: u16,
     /// Editor state while `ViewMode::EditNote` is active.
@@ -154,27 +153,20 @@ fn main() -> Result<(), Box<dyn Error>> {
 impl App {
     fn setup() -> Self {
         Self {
-            selected_project_index: ListState::default().with_selected(Some(0)),
-            selected_task_index: ListState::default().with_selected(Some(0)),
-            selected_status_task_index: ListState::default().with_selected(Some(0)),
-            selected_priority_task_index: ListState::default().with_selected(Some(0)),
-            delete_confirm_index: ListState::default().with_selected(Some(DELETE_CANCEL_INDEX)),
+            selected_project_index: Selection::first(),
+            selected_task_index: Selection::first(),
+            selected_status_task_index: Selection::first(),
+            selected_priority_task_index: Selection::first(),
+            delete_confirm_index: Selection::with_selected(Some(DELETE_CANCEL_INDEX)),
             view_mode: ViewMode::default(),
             previous_view_mode: ViewMode::default(),
             projects: Json::read(),
             hide_done_tasks: true,
             timer: None,
             board_view: false,
-            board_lane: 0,
-            board_lane_states: [
-                ListState::default().with_selected(Some(0)),
-                ListState::default().with_selected(Some(0)),
-                ListState::default().with_selected(Some(0)),
-                ListState::default().with_selected(Some(0)),
-                ListState::default().with_selected(Some(0)),
-            ],
+            board: Board::new(),
             notes: Json::read_notes(),
-            selected_note_index: ListState::default().with_selected(Some(0)),
+            selected_note_index: Selection::first(),
             note_scroll: 0,
             note_textarea: None,
             task_note_textarea: None,
@@ -349,7 +341,7 @@ impl App {
                 }
 
                 Task::load_items(self, items);
-                self.selected_task_index.select(Some(0));
+                self.selected_task_index.select_first();
 
                 // The sync inside `load_items` ran before the
                 // selection was reset to the top
@@ -452,8 +444,7 @@ impl App {
             Enter => {
                 if !input.value().is_empty() {
                     Project::create(self, items, input.value());
-                    self.selected_project_index
-                        .select(Some(self.projects.len() - 1));
+                    self.selected_project_index.select_last(self.projects.len());
                 }
 
                 App::change_view(self, ViewMode::ViewProjects);
@@ -479,7 +470,8 @@ impl App {
                 let deleted_index = self.selected_project_index.selected().unwrap();
 
                 Project::delete(self, items);
-                self.selected_project_index.select_previous();
+                self.selected_project_index
+                    .after_delete(deleted_index, self.projects.len());
 
                 // Keep the timer binding consistent: a timer on the
                 // deleted project is dropped, later indexes shift down
@@ -1053,8 +1045,7 @@ impl App {
                     Note::create(self, items, input.value());
                     input.reset();
 
-                    self.selected_note_index
-                        .select(Some(self.notes.len().saturating_sub(1)));
+                    self.selected_note_index.select_last(self.notes.len());
                 }
 
                 App::change_view(self, ViewMode::ViewNotes);
@@ -1108,7 +1099,10 @@ impl App {
         }
         if key.code == KeyCode::Enter {
             if self.delete_confirm_index.selected() == Some(DELETE_CONFIRM_INDEX) {
+                let deleted = self.selected_note_index.selected().unwrap_or(0);
                 Note::delete(self, items);
+                self.selected_note_index
+                    .after_delete(deleted, self.notes.len());
             }
             self.delete_confirm_index.select(Some(DELETE_CANCEL_INDEX));
             App::change_view(self, ViewMode::ViewNotes);
@@ -1337,50 +1331,28 @@ impl App {
     }
 
     fn next(&mut self, items: &Vec<ListItem>) -> () {
-        if items.is_empty() {
-            return;
-        }
-
-        let i = match self.use_state().selected() {
-            Some(i) => {
-                if i >= items.len() - 1 {
-                    0
-                } else {
-                    i + 1
-                }
-            }
-            None => 0,
-        };
-
-        self.use_state().select(Some(i))
+        let len = items.len();
+        self.use_state().move_next(len);
     }
 
     fn previous(&mut self, items: &Vec<ListItem>) {
-        if items.is_empty() {
-            return;
-        }
-
-        let i = match self.use_state().selected() {
-            Some(i) => {
-                if i == 0 {
-                    items.len() - 1
-                } else {
-                    i - 1
-                }
-            }
-            None => 0,
-        };
-
-        self.use_state().select(Some(i))
+        let len = items.len();
+        self.use_state().move_prev(len);
     }
 
-    /// Delete the selected task, move the selection to the previous one,
-    /// and keep the board focus consistent with the action target
-    /// (`select_previous` runs after the sync inside `Task::load_items`,
-    /// so the board must be re-synced afterwards).
+    /// Delete the selected task and move the selection to the predecessor,
+    /// keeping the board focus consistent with the action target.
     fn delete_current_task(&mut self, items: &mut Vec<ListItem>) {
+        let deleted = self.selected_task_index.selected().unwrap_or(0);
         Task::delete(self, items);
-        self.selected_task_index.select_previous();
+        let len = self
+            .projects
+            .get(self.selected_project_index.selected().unwrap_or(0))
+            .map(|p| p.tasks.len())
+            .unwrap_or(0);
+        // `Task::load_items` selects the successor (or 0 when out of
+        // bounds); move to the predecessor instead.
+        self.selected_task_index.after_delete(deleted, len);
 
         if self.board_view {
             self.board_sync();
@@ -1394,7 +1366,7 @@ impl App {
 
     /// Whether the currently focused board lane has no tasks.
     fn board_lane_is_empty(&self) -> bool {
-        self.board_lane_len(self.board_lane) == 0
+        self.board_lane_len(self.board.lane) == 0
     }
 
     /// Derive the focused lane and the per-lane selection from
@@ -1419,13 +1391,13 @@ impl App {
             return;
         };
 
-        self.board_lane = lane;
+        self.board.lane = lane;
 
         let row = Task::lane_indices(self, TASK_STATUSES[lane])
             .iter()
             .position(|&i| i == selected)
             .unwrap_or(0);
-        self.board_lane_states[lane].select(Some(row));
+        self.board.select_row(lane, row);
     }
 
     /// Focus the previous/next board lane (wrapping) and move the task
@@ -1435,55 +1407,47 @@ impl App {
     fn board_switch_lane(&mut self, forward: bool) {
         let lane_count = TASK_STATUSES.len();
         let lane = if forward {
-            (self.board_lane + 1) % lane_count
+            (self.board.lane + 1) % lane_count
         } else {
-            (self.board_lane + lane_count - 1) % lane_count
+            (self.board.lane + lane_count - 1) % lane_count
         };
-        self.board_lane = lane;
+        self.board.lane = lane;
 
         let indices = Task::lane_indices(self, TASK_STATUSES[lane]);
         if indices.is_empty() {
             return;
         }
 
-        let row = self.board_lane_states[lane]
-            .selected()
-            .unwrap_or(0)
-            .min(indices.len() - 1);
-        self.board_lane_states[lane].select(Some(row));
+        self.board.clamp_row(lane, indices.len());
+        let row = self.board.row(lane).unwrap_or(0).min(indices.len() - 1);
+        self.board.select_row(lane, row);
         self.selected_task_index.select(Some(indices[row]));
     }
 
     /// Move the selection one row up/down within the focused lane
     /// (wrapping), keeping `selected_task_index` pointed at the same task.
     fn board_move(&mut self, down: bool) {
-        let lane = self.board_lane;
+        let lane = self.board.lane;
         let indices = Task::lane_indices(self, TASK_STATUSES[lane]);
         if indices.is_empty() {
             return;
         }
 
-        let row = self.board_lane_states[lane]
-            .selected()
-            .unwrap_or(0)
-            .min(indices.len() - 1);
+        self.board.clamp_row(lane, indices.len());
+        let cur = self.board.row(lane).unwrap_or(0).min(indices.len() - 1);
         let row = if down {
-            if row >= indices.len() - 1 {
-                0
-            } else {
-                row + 1
-            }
-        } else if row == 0 {
+            (cur + 1) % indices.len()
+        } else if cur == 0 {
             indices.len() - 1
         } else {
-            row - 1
+            cur - 1
         };
 
-        self.board_lane_states[lane].select(Some(row));
+        self.board.select_row(lane, row);
         self.selected_task_index.select(Some(indices[row]));
     }
 
-    fn use_state(&mut self) -> &mut ListState {
+    fn use_state(&mut self) -> &mut Selection {
         match self.view_mode {
             ViewMode::ViewProjects => return &mut self.selected_project_index,
             ViewMode::RenameProject => return &mut self.selected_project_index,
@@ -1529,6 +1493,11 @@ impl App {
             },
             ViewMode::InfoMigration => return &mut self.selected_project_index,
         };
+    }
+
+    /// `ListState` handle for `render_stateful_widget`.
+    pub(crate) fn render_state(&mut self) -> &mut ListState {
+        self.use_state().state()
     }
 
     fn change_view(&mut self, mode: ViewMode) {
@@ -1594,7 +1563,7 @@ impl App {
     ) -> bool {
         match key {
             KeyCode::Esc => {
-                self.use_state().select(Some(0));
+                self.use_state().select_first();
                 App::change_view(self, return_mode);
                 true
             }
@@ -1636,27 +1605,20 @@ pub(crate) mod test_utils {
 
     pub(crate) fn make_app(projects: Vec<Project>) -> App {
         App {
-            selected_project_index: ListState::default().with_selected(Some(0)),
-            selected_task_index: ListState::default().with_selected(Some(0)),
-            selected_status_task_index: ListState::default().with_selected(Some(0)),
-            selected_priority_task_index: ListState::default().with_selected(Some(0)),
-            delete_confirm_index: ListState::default().with_selected(Some(DELETE_CANCEL_INDEX)),
+            selected_project_index: Selection::first(),
+            selected_task_index: Selection::first(),
+            selected_status_task_index: Selection::first(),
+            selected_priority_task_index: Selection::first(),
+            delete_confirm_index: Selection::with_selected(Some(DELETE_CANCEL_INDEX)),
             view_mode: ViewMode::default(),
             previous_view_mode: ViewMode::default(),
             projects,
             hide_done_tasks: true,
             timer: None,
             board_view: false,
-            board_lane: 0,
-            board_lane_states: [
-                ListState::default().with_selected(Some(0)),
-                ListState::default().with_selected(Some(0)),
-                ListState::default().with_selected(Some(0)),
-                ListState::default().with_selected(Some(0)),
-                ListState::default().with_selected(Some(0)),
-            ],
+            board: Board::new(),
             notes: vec![],
-            selected_note_index: ListState::default().with_selected(Some(0)),
+            selected_note_index: Selection::first(),
             note_scroll: 0,
             note_textarea: None,
             task_note_textarea: None,
@@ -1797,9 +1759,9 @@ mod tests {
 
     #[test]
     fn use_state_maps_view_modes_to_the_right_list_state() {
-        fn assert_state(app: &mut App, mode: ViewMode, expected: fn(&App) -> *const ListState) {
+        fn assert_state(app: &mut App, mode: ViewMode, expected: fn(&App) -> *const Selection) {
             app.view_mode = mode;
-            let actual = app.use_state() as *const ListState;
+            let actual = app.use_state() as *const Selection;
             assert_eq!(actual, expected(app));
         }
 
@@ -1894,8 +1856,8 @@ mod tests {
 
             // TASK_STATUSES order: UpNext = 0, OnGoing = 1, Testing = 2,
             // Pending = 3, Done = 4
-            assert_eq!(app.board_lane, 1);
-            assert_eq!(app.board_lane_states[1].selected(), Some(0));
+            assert_eq!(app.board.lane, 1);
+            assert_eq!(app.board.rows[1].selected(), Some(0));
         }
 
         #[test]
@@ -1911,9 +1873,9 @@ mod tests {
             // The selection follows the task into the Done lane instead of
             // jumping to the first still-visible list item
             assert_eq!(Task::get_current(&mut app).title, "ongoing");
-            assert_eq!(app.board_lane, 4);
+            assert_eq!(app.board.lane, 4);
             assert_eq!(app.selected_task_index.selected(), Some(3));
-            assert_eq!(app.board_lane_states[4].selected(), Some(0));
+            assert_eq!(app.board.rows[4].selected(), Some(0));
         }
 
         #[test]
@@ -1935,23 +1897,23 @@ mod tests {
             app.board_sync(); // lane 1 (OnGoing)
 
             app.board_switch_lane(true); // lane 2 (Testing)
-            assert_eq!(app.board_lane, 2);
+            assert_eq!(app.board.lane, 2);
             assert_eq!(app.selected_task_index.selected(), Some(1));
 
             app.board_switch_lane(true); // lane 3 (Pending)
-            assert_eq!(app.board_lane, 3);
+            assert_eq!(app.board.lane, 3);
             assert_eq!(app.selected_task_index.selected(), Some(3));
 
             app.board_switch_lane(true); // lane 4 (Done)
-            assert_eq!(app.board_lane, 4);
+            assert_eq!(app.board.lane, 4);
             assert_eq!(app.selected_task_index.selected(), Some(4));
 
             app.board_switch_lane(true); // wraps to lane 0 (UpNext)
-            assert_eq!(app.board_lane, 0);
+            assert_eq!(app.board.lane, 0);
             assert_eq!(app.selected_task_index.selected(), Some(2));
 
             app.board_switch_lane(false); // back to lane 4 (Done)
-            assert_eq!(app.board_lane, 4);
+            assert_eq!(app.board.lane, 4);
             assert_eq!(app.selected_task_index.selected(), Some(4));
         }
 
@@ -1963,11 +1925,11 @@ mod tests {
                 .retain(|t| t.status != TASK_STATUS_ON_GOING && t.status != TASK_STATUS_TESTING);
             app.selected_task_index.select(Some(0)); // "upnext"
             app.board_sync();
-            assert_eq!(app.board_lane, 0);
+            assert_eq!(app.board.lane, 0);
 
             app.board_switch_lane(true); // OnGoing lane, now empty
 
-            assert_eq!(app.board_lane, 1);
+            assert_eq!(app.board.lane, 1);
             assert!(app.board_lane_is_empty());
             assert_eq!(app.selected_task_index.selected(), Some(0));
         }
@@ -2022,8 +1984,8 @@ mod tests {
             app.delete_current_task(&mut items);
 
             assert_eq!(Task::get_current(&mut app).title, "c");
-            let lane = app.board_lane;
-            let row = app.board_lane_states[lane].selected().unwrap();
+            let lane = app.board.lane;
+            let row = app.board.rows[lane].selected().unwrap();
             let lane_indices = Task::lane_indices(&app, TASK_STATUSES[lane]);
             assert_eq!(
                 lane_indices.get(row).copied(),

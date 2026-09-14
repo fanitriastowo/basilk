@@ -320,7 +320,7 @@ impl View {
             .block(Block::bordered().title(format!("Delete \"{}\"?", title)));
 
         f.render_widget(Clear, area);
-        f.render_stateful_widget(list_widget, area, app.use_state())
+        f.render_stateful_widget(list_widget, area, app.render_state())
     }
 
     pub fn show_select_task_status_modal(
@@ -340,7 +340,7 @@ impl View {
             .block(Block::bordered().title("Status"));
 
         f.render_widget(Clear, area);
-        f.render_stateful_widget(task_status_list_widget, area, app.use_state())
+        f.render_stateful_widget(task_status_list_widget, area, app.render_state())
     }
 
     pub fn show_select_task_priority_modal(
@@ -358,7 +358,7 @@ impl View {
             .block(Block::bordered().title("Priority"));
 
         f.render_widget(Clear, area);
-        f.render_stateful_widget(task_status_list_widget, area, app.use_state())
+        f.render_stateful_widget(task_status_list_widget, area, app.render_state())
     }
 
     pub fn show_items(app: &mut App, items: &Vec<ListItem>, f: &mut Frame, area: Rect) {
@@ -422,7 +422,7 @@ impl View {
         {
             f.render_widget(items, area)
         } else {
-            f.render_stateful_widget(items, area, app.use_state());
+            f.render_stateful_widget(items, area, app.render_state());
         }
     }
 
@@ -449,7 +449,7 @@ impl View {
         for (lane, status) in TASK_STATUSES.into_iter().enumerate() {
             let indices = Task::lane_indices(app, status);
             let status_color = Task::get_status_color(&status.to_string());
-            let focused = lane == app.board_lane;
+            let focused = lane == app.board.lane;
 
             let lane_style = if focused {
                 Style::default()
@@ -501,7 +501,7 @@ impl View {
                 .highlight_spacing(HighlightSpacing::Always)
                 .block(lane_block);
 
-            f.render_stateful_widget(list, columns[lane], &mut app.board_lane_states[lane]);
+            f.render_stateful_widget(list, columns[lane], app.board.rows[lane].state());
         }
     }
 

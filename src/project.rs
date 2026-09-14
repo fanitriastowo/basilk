@@ -55,6 +55,8 @@ impl Project {
 
             items.push(ListItem::from(lines))
         }
+
+        app.selected_project_index.clamp(app.projects.len());
     }
 
     pub fn get_current(app: &mut App) -> &Project {

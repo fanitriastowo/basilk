@@ -53,12 +53,7 @@ impl Note {
             items.push(ListItem::from(Line::from(spans)))
         }
 
-        let selected = app
-            .selected_note_index
-            .selected()
-            .unwrap_or(0)
-            .min(app.notes.len().saturating_sub(1));
-        app.selected_note_index.select(Some(selected));
+        app.selected_note_index.clamp(app.notes.len());
     }
 
     pub fn get_current(app: &mut App) -> &Note {
